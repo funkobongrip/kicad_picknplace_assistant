@@ -31,16 +31,25 @@ def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
 
 	plt.text(0.5, 1.1, "BOM List", wrap=False, horizontalalignment='center', verticalalignment='top')
 
-	columns = ('Anzahl x %d' % (boards), 'Anzahl', 'Footprint', 'Value')
+	if boards == None:
+		columns = ('Anzahl', 'Footprint', 'Value')
+		column_widths = [0.1, 0.45, 0.45]
+	else:
+		columns = ('Anzahl x %d' % (boards), 'Anzahl', 'Footprint', 'Value')
+		column_widths = [0.1, 0.1, 0.4, 0.4]
+
 
 	cell_text = []
 	for i, bom_row in enumerate(bom_table):
 		if i >= bom_table_start and i < (bom_table_start+bom_table_items_per_page):
 			qty, value, footpr, smt, highlight_refs = bom_row
-			cell_text.append([str(qty * boards), str(qty), footpr, value])
+			if boards == None:
+				cell_text.append([str(qty), footpr, value])
+			else:
+				cell_text.append([str(qty * boards), str(qty), footpr, value])
 
 	#the_table = plt.table(cellText=cell_text, rowLabels=rows, rowColours=colors, colLabels=columns, loc='bottom')
-	table = plt.table(cellText=cell_text, colLabels=columns, loc='upper left', bbox=[0.0, 0, 1, 1], colWidths=[0.1, 0.1, 0.4, 0.4])
+	table = plt.table(cellText=cell_text, colLabels=columns, loc='upper left', bbox=[0.0, 0, 1, 1], colWidths=column_widths)
 	table.set_fontsize(12)
 	#table.scale(1.5, 1.5)
 
@@ -275,6 +284,8 @@ if __name__ == "__main__":
                       help="sort pdfs (when splitting) to folders tht smt smt/passives")
     parser.add_option('-n', '--panels', action="store", dest="boards", type="int",
                       help="set number of boards/panels to populate")
+    parser.add_option('-b', '--bom-only', action="store_true", dest="bom_only",
+                      help="print only bom, then exit")
     options, args = parser.parse_args()
 
     if len(args) != 1:
@@ -303,7 +314,9 @@ if __name__ == "__main__":
                 create_board_bom(pcb, options.boards, bom_table, st * bom_table_items_per_page, (st+1) * bom_table_items_per_page)
                 pdf.savefig()
                 plt.close()
-            exit(1)
+
+            if options.bom_only:
+                exit(0)
 
             for i, bom_row in enumerate(bom_table_bot):
                 print("Plotting bottom page (%d/%d) %s / %s" % (i+1, len(bom_table_bot),
