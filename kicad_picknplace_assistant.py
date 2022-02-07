@@ -29,7 +29,7 @@ def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
 	color_bbox1 = "None"
 	color_bbox2 = "#E9AFAF"
 
-	plt.text(0.5, 1.1, "BOM List", wrap=False, horizontalalignment='center', verticalalignment='top')
+	plt.text(0.5, 1.1, "BOM List: " + os.path.splitext(pcb.GetFileName())[0], wrap=False, horizontalalignment='center', verticalalignment='top')
 
 	if boards == None:
 		columns = ('Anzahl', 'Footprint', 'Value')
