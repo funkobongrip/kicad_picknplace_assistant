@@ -93,7 +93,7 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
             horizontalalignment='center', verticalalignment='top')
 
     # draw parts
-    for m in pcb.GetModules():
+    for m in pcb.GetFootprints():
         if m.GetLayer() != layer:
             continue
         ref, center = m.GetReference(), np.asarray(m.GetCenter()) * 1e-6
@@ -118,7 +118,7 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
             highlight = False
 
         # bounding box
-        mrect = m.GetFootprintRect()
+        mrect = m.GetBoundingBox(False, False)
         mrect_pos = np.asarray(mrect.GetPosition()) * 1e-6
         mrect_size = np.asarray(mrect.GetSize()) * 1e-6
         if layer == pcbnew.B_Cu:
@@ -204,7 +204,7 @@ def generate_bom(pcb, filter_layer=None):
 
     # build grouped part list
     part_groups = {}
-    for m in pcb.GetModules():
+    for m in pcb.GetFootprints():
         smd_part = 0
         # filter part by layer
         if filter_layer is not None and filter_layer != m.GetLayer():
