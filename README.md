@@ -9,14 +9,31 @@ For a more advanced, interactive solution see: [InteractiveHtmlBom](https://gith
 
 ## Getting Started and Usage
 
-Simply call the script with Python 2.7, and provide the filename of your *.kicad_pcb file.
+Simply call the script with Python 3, and provide the filename of your *.kicad_pcb file.
 ```
 python kicad_picknplace_assistant.py your_file.kicad_pcb
 ```
 
+Added a few features:
+
+  -s, --split           split into one file per component
+
+  -p, --precise         be precise with footprints (else C0402N == C0402L)
+
+  -m, --dontconnectorgroup ignore connector values when grouping parts
+
+  -f, --folders         sort pdfs (when splitting) to folders tht smt smt/passives
+
+  -n BOARDS, --panels=BOARDS set number of boards/panels to populate
+
+  -b, --bom-only        print only bom, then exit
+
+  -c, --csv-bom         create csv bom file
+
+
 ### Prerequisites
 
-This script runs on Python 2.7.
+This script runs on Python 3.
 
 Requires matplotlib, numpy etc.
 
@@ -24,4 +41,4 @@ Requires the KiCAD's pcbnew to be installed (it comes with the required Python l
 
 ## Acknowledgments
 
-Included modifications from [@simonfojtu](https://github.com/simonfojtu) and [@tohyf](https://github.com/tohyf).
+Original script by [@pwuertz](https://github.com/pwuertz)
