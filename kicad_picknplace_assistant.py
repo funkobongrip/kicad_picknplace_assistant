@@ -108,7 +108,7 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
         if options.precise != True:
             mfootpr = re.sub(r'^([A-Z]{1,3}[0-9]{4})[LNM]$', r'\1', mfootpr)
 
-        if options.congroup != True:
+        if options.dontcongroup == True:
             if re.match('^[XM][0-9]', ref):
                 mvalue = mfootpr
 
@@ -225,7 +225,7 @@ def generate_bom(pcb, filter_layer=None):
                 smd_part = 1
 
         reference = m.GetReference()
-        if options.congroup != True:
+        if options.dontcongroup == True:
             if re.match('^[XM][0-9]', reference):
                 value = footpr
 
@@ -278,8 +278,8 @@ if __name__ == "__main__":
                       dest="split", help="split into one file per component")
     parser.add_option('-p', '--precise', action="store_true", dest="precise",
                       help="be precise with footprints (else C0402N == C0402L)")
-    parser.add_option('-m', '--connectorgroup', action="store_true",
-                      dest="congroup", help="don't ignore connector values when grouping parts")
+    parser.add_option('-m', '--dontconnectorgroup', action="store_true",
+                      dest="dontcongroup", help="ignore connector values when grouping parts")
     parser.add_option('-f', '--folders', action="store_true", dest="fsort",
                       help="sort pdfs (when splitting) to folders tht smt smt/passives")
     parser.add_option('-n', '--panels', action="store", dest="boards", type="int",
