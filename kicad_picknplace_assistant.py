@@ -10,6 +10,7 @@ import pcbnew
 import numpy as np
 import os
 import re
+import csv
 #import sys
 #reload(sys)
 #sys.setdefaultencoding("utf-8")
@@ -20,7 +21,11 @@ ignore_value = ["FIDUCIAL", "DNP"]
 
 bom_table_items_per_page = 50
 
+bom_csv_open = 0
+bom_csv_writer = None
+
 def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
+	global bom_csv_open, bom_csv_writer
 	plt.figure(figsize=(5.8, 8.2))
 
 	color_pad = "lightgray"
@@ -38,6 +43,10 @@ def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
 		columns = ('Anzahl x %d' % (boards), 'Anzahl', 'Footprint', 'Value')
 		column_widths = [0.1, 0.1, 0.4, 0.4]
 
+	if bom_csv_open == 0 and options.csv_bom == True:
+		bom_csv_open = open(os.path.splitext(file)[0] + "_bom.csv", 'w')
+		bom_csv_writer = csv.writer(bom_csv_open)
+		bom_csv_writer.writerow(['total_qty', 'board_qty', 'footprint', 'value', 'refs'])
 
 	cell_text = []
 	for i, bom_row in enumerate(bom_table):
@@ -47,6 +56,8 @@ def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
 				cell_text.append([str(qty), footpr, value])
 			else:
 				cell_text.append([str(qty * boards), str(qty), footpr, value])
+			if options.csv_bom == True:
+				bom_csv_writer.writerow([str(qty * (1 if boards == None else boards)), str(qty), footpr, value, ", ".join(highlight_refs)])
 
 	#the_table = plt.table(cellText=cell_text, rowLabels=rows, rowColours=colors, colLabels=columns, loc='bottom')
 	table = plt.table(cellText=cell_text, colLabels=columns, loc='upper left', bbox=[0.0, 0, 1, 1], colWidths=column_widths)
@@ -286,6 +297,8 @@ if __name__ == "__main__":
                       help="set number of boards/panels to populate")
     parser.add_option('-b', '--bom-only', action="store_true", dest="bom_only",
                       help="print only bom, then exit")
+    parser.add_option('-c', '--csv-bom', action="store_true", dest="csv_bom",
+                      help="create csv bom file")
     options, args = parser.parse_args()
 
     if len(args) != 1:
