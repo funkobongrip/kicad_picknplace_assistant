@@ -107,7 +107,7 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
     for m in pcb.GetFootprints():
         if m.GetLayer() != layer:
             continue
-        ref, center = m.GetReference(), np.asarray(m.GetCenter()) * 1e-6
+        ref, center = m.GetReference(), np.asarray(m.GetPosition()) * 1e-6
 
         # do the same checks and replacements as in bom generation
         mvalue = m.GetValue()
