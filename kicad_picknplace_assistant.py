@@ -370,7 +370,7 @@ if __name__ == "__main__":
 			csv_file_bot_name = os.path.splitext(file)[0] + "_picknplace_bot.csv"
 			csv_file_top_name = os.path.splitext(file)[0] + "_picknplace_top.csv"
 			
-			if len(bom_table_bot) > 0:
+			if len(bom_table_bot) > 0 and options.csv_pnp == True:
 				try:
 					csv_file_bot = open(csv_file_bot_name, 'w')
 				except:
@@ -378,7 +378,7 @@ if __name__ == "__main__":
 				if options.csv_pnp == True:
 					csv_pnp_header(csv_file_bot, os.path.splitext(file)[0] + "_bot")
 
-			if len(bom_table_top) > 0:
+			if len(bom_table_top) > 0 and options.csv_pnp == True:
 				try:
 					csv_file_top = open(csv_file_top_name, 'w')
 				except:
@@ -404,12 +404,12 @@ if __name__ == "__main__":
 
 			print("Output written to %s" % fname_out)
 
-			if len(bom_table_bot) > 0:
+			if len(bom_table_bot) > 0 and options.csv_pnp == True:
 				csv_file_bot.close()
 				if options.csv_pnp == True:
 					print("Output written to %s" % csv_file_bot_name)
 
-			if len(bom_table_top) > 0:
+			if len(bom_table_top) > 0 and options.csv_pnp == True:
 				csv_file_top.close()
 				if options.csv_pnp == True:
 					print("Output written to %s" % csv_file_top_name)
