@@ -11,18 +11,30 @@ import numpy as np
 import os
 import re
 import csv
+
+try:
+	from kiutils.board import Board
+	from kiutils.schematic import Schematic
+	from kiutils.symbol import SymbolLib
+	from kiutils.symbol import Symbol
+	from kiutils.items.common import *
+	kiutils_available = True
+except ImportError:
+	kiutils_available = False
+
 #import sys
 #reload(sys)
 #sys.setdefaultencoding("utf-8")
 
-ignore_footpr = ["FIDUCIAL", "^TP[-_]", "^TP$", "^SP$",
-				 "^SCREW_[S]?[HM][0-9\.]{1,3}[_W]{0,2}$", "^Jumper[1-9]_Triangle"]
+ignore_footpr = ["FIDUCIAL", "^Jumper[1-9]_Triangle"]
 ignore_value = ["FIDUCIAL", "DNP"]
 
 bom_table_items_per_page = 50
 
 bom_csv_open = 0
 bom_csv_writer = None
+
+schematic_symbols = {}
 
 def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
 	global bom_csv_open, bom_csv_writer
@@ -46,18 +58,24 @@ def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
 	if bom_csv_open == 0 and options.csv_bom == True:
 		bom_csv_open = open(os.path.splitext(file)[0] + "_bom.csv", 'w')
 		bom_csv_writer = csv.writer(bom_csv_open)
-		bom_csv_writer.writerow(['total_qty', 'board_qty', 'footprint', 'value', 'refs'])
+		if options.symbol_names == True:
+			bom_csv_writer.writerow(['total_qty', 'board_qty', 'footprint', 'symname', 'value', 'partdb_id', 'refs'])
+		else:
+			bom_csv_writer.writerow(['total_qty', 'board_qty', 'footprint', 'value', 'partdb_id', 'refs'])
 
 	cell_text = []
 	for i, bom_row in enumerate(bom_table):
 		if i >= bom_table_start and i < (bom_table_start+bom_table_items_per_page):
-			qty, value, footpr, smt, highlight_refs = bom_row
+			qty, value, partdb_id, footpr, symname, smt, highlight_refs = bom_row
 			if boards == None:
 				cell_text.append([str(qty), footpr, value])
 			else:
 				cell_text.append([str(qty * boards), str(qty), footpr, value])
 			if options.csv_bom == True:
-				bom_csv_writer.writerow([str(qty * (1 if boards == None else boards)), str(qty), footpr, value, ", ".join(highlight_refs)])
+				if options.symbol_names == True:
+					bom_csv_writer.writerow([str(qty * (1 if boards == None else boards)), str(qty), footpr, symname, value, partdb_id, ", ".join(highlight_refs)])
+				else:
+					bom_csv_writer.writerow([str(qty * (1 if boards == None else boards)), str(qty), footpr, value, partdb_id, ", ".join(highlight_refs)])
 
 	#the_table = plt.table(cellText=cell_text, rowLabels=rows, rowColours=colors, colLabels=columns, loc='bottom')
 	table = plt.table(cellText=cell_text, colLabels=columns, loc='upper left', bbox=[0.0, 0, 1, 1], colWidths=column_widths)
@@ -67,10 +85,10 @@ def create_board_bom(pcb, boards, bom_table, bom_table_start, bom_table_end):
 	plt.axis('off')
 
 def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
-	qty, value, footpr, smt, highlight_refs = bom_row
+	qty, value, partdb_id, footpr, symname, smt, highlight_refs = bom_row
 
 	plt.figure(figsize=(5.8, 8.2))
-	ax = plt.subplot("111", aspect="equal")
+	ax = plt.subplot(111, aspect="equal")
 
 	color_pad = "lightgray"
 	color_pad_highlight = "#990000"
@@ -116,9 +134,6 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
 		except:
 			mfootpr = str(m.GetFPID().GetLibItemName())
 
-		if options.precise != True:
-			mfootpr = re.sub(r'^([A-Z]{1,3}[0-9]{4})[LNM]$', r'\1', mfootpr)
-
 		if options.dontcongroup == True:
 			if re.match('^[XM][0-9]', ref):
 				mvalue = mfootpr
@@ -160,9 +175,8 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
 			offset = p.GetOffset()  # TODO: check offset
 
 			# pad rect
-			angle = p.GetOrientation() * 0.1
-			cos, sin = np.cos(
-				np.pi / 180. * angle), np.sin(np.pi / 180. * angle)
+			angle = p.GetOrientation().AsDegrees()
+			cos, sin = np.cos(np.pi / 180. * angle), np.sin(np.pi / 180. * angle)
 			dpos = np.dot([[cos, -sin], [sin, cos]], -.5 * size)
 
 			if shape == 1:
@@ -172,6 +186,8 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
 			elif shape == 4:
 				rct = Rectangle(pos + dpos, size[0], size[1], angle=angle)
 			elif shape == 5:
+				rct = Rectangle(pos + dpos, size[0], size[1], angle=angle)
+			elif shape == 6:
 				rct = Rectangle(pos + dpos, size[0], size[1], angle=angle)
 			elif shape == 0:
 				rct = Ellipse(pos, size[0], size[1], angle=angle)
@@ -219,34 +235,43 @@ def generate_bom(pcb, filter_layer=None):
 		# filter part by layer
 		if filter_layer is not None and filter_layer != m.GetLayer():
 			continue
+
 		# group part refs by value and footprint
 		value = m.GetValue()
-		try:
-			footpr = str(m.GetFPID().GetFootprintName())
-		except:
-			footpr = str(m.GetFPID().GetLibItemName())
 
-		if options.precise != True:
-			footpr = re.sub(r'^([A-Z]{1,3}[0-9]{4})[LNM]$', r'\1', footpr)
-
+		if options.short_names == True:
+			try:
+				footpr = str(m.GetFPID().GetFootprintName())
+			except:
+				footpr = str(m.GetFPID().GetLibItemName())
+		else:
+			footpr = m.GetFPIDAsString()
+		
+		partdb_id = ""
+		if m.HasFieldByName("Part-DB ID") == True:
+			partdb_id = m.GetFieldText("Part-DB ID")
+		
 		# check for smd pads
 		for p in m.Pads():
 			if p.GetAttribute() == 1:
 				smd_part = 1
 
 		reference = m.GetReference()
-		if options.dontcongroup == True:
-			if re.match('^[XM][0-9]', reference):
-				value = footpr
 
-		group_key = (value, footpr, smd_part)
+		if reference in schematic_symbols:
+			symbol_lib_name = schematic_symbols[reference]
+		else:
+			symbol_lib_name = ''
+			print('"' + reference + '" not found in schematic')
+
+		group_key = (value, footpr, m.IsDNP(), m.IsExcludedFromBOM(), partdb_id, smd_part, symbol_lib_name)
 		refs = part_groups.setdefault(group_key, [])
 		refs.append(reference)
 
 	# build bom table, sort refs
 	bom_table_smd = []
 	bom_table_thd = []
-	for (value, footpr, smd_part), refs in part_groups.items():
+	for (value, footpr, dnp, bom_exclude, partdb_id, smd_part, symname), refs in part_groups.items():
 		add_footprint = 1
 		for regex in ignore_value:
 			m = re.match(regex, value)
@@ -258,17 +283,22 @@ def generate_bom(pcb, filter_layer=None):
 			if m:
 				add_footprint = 0
 
-		line = (len(refs), value, footpr, smd_part, natural_sort(refs))
-		if add_footprint == 1 and smd_part != 1:
-			bom_table_thd.append(line)
-		elif add_footprint == 1:
-			bom_table_smd.append(line)
+		line = (len(refs), value, partdb_id, footpr, symname, smd_part, natural_sort(refs))
+		if dnp == True:
+			print("Ignoring footprint " + footpr + " with value " + value + " is dnp")
+		elif bom_exclude == True:
+			print("Ignoring footprint " + footpr + " with value " + value + " is excluded from bom")
+		elif add_footprint != 1:
+			print("Ignoring footprint " + footpr + " with value " + value + " due to exclusion list")
 		else:
-			print("Ignoring footprint " + footpr + " with value " + value)
+			if smd_part != 1:
+				bom_table_thd.append(line)
+			else:
+				bom_table_smd.append(line)
 
 	# sort table by reference prefix and quantity
 	def sort_func(row):
-		qty, _, _, _, rf = row
+		qty, _, _, _, _, _, rf = row
 		ref_ord = {"R": 3, "C": 3, "L": 1, "D": 1,
 				   "J": -1, "P": -1}.get(rf[0][0], 0)
 		return -ref_ord, -qty
@@ -284,7 +314,7 @@ def csv_pnp_header(file, pcb_name):
 	file.write("Side,Reference,Package Name,Part Number (Value),X,Y,Z offset,Rotation\n")
 
 def csv_pnp_addline(csv_file, pcb, bom_row, boards, layer=pcbnew.F_Cu):
-	qty, value, footpr, smt, highlight_refs = bom_row
+	qty, value, partdb_id, footpr, symname, smt, highlight_refs = bom_row
 
 	# get board edges (assuming rectangular, axis aligned pcb)
 	edge_coords = []
@@ -309,20 +339,29 @@ def csv_pnp_addline(csv_file, pcb, bom_row, boards, layer=pcbnew.F_Cu):
 		except:
 			mfootpr = str(m.GetFPID().GetLibItemName())
 
-		if options.precise != True:
-			mfootpr = re.sub(r'^([A-Z]{1,3}[0-9]{4})[LNM]$', r'\1', mfootpr)
-
 		if ref in highlight_refs and mvalue == value and mfootpr == footpr:
 			print("\"%s\",\"%s\",\"%s\",\"%s\",%.2f,-%.2f,0.00,%.1f" % (("TOP" if layer==pcbnew.F_Cu else "BOT"), ref, footpr, value, center[0], center[1], m.GetOrientationDegrees()), file=csv_file)
 
+def load_schematic_symbols(sch_file):
+	symbols = []
+	print("loading schematic from " + sch_file)
+	schematic = Schematic().from_file(sch_file)
+	for sym in schematic.schematicSymbols:
+		symbols.append(sym)
+
+	for sheet in schematic.sheets:
+		subsymbols = load_schematic_symbols(sheet.fileName.value)
+		for sym in subsymbols:
+			symbols.append(sym)
+
+	return symbols
+	
 
 if __name__ == "__main__":
 	parser = optparse.OptionParser(
 		description='KiCad PCB pick and place assistant')
 	parser.add_option('-s', '--split', action="store_true",
 					  dest="split", help="split into one file per component")
-	parser.add_option('-p', '--precise', action="store_true", dest="precise",
-					  help="be precise with footprints (else C0402N == C0402L)")
 	parser.add_option('-m', '--dontconnectorgroup', action="store_true",
 					  dest="dontcongroup", help="ignore connector values when grouping parts")
 	parser.add_option('-f', '--folders', action="store_true", dest="fsort",
@@ -335,13 +374,30 @@ if __name__ == "__main__":
 					  help="create csv bom file")
 	parser.add_option('-x', '--csv-pnp', action="store_true", dest="csv_pnp",
 					  help="create csv pnp file")
+	parser.add_option('-l', '--short-names', action="store_true", dest="short_names",
+					  help="create short symbol and footprint names (without library)")
+	parser.add_option('-y', '--symbol-names', action="store_true", dest="symbol_names",
+					  help="include symbol names (requires kiutils)")
 	options, args = parser.parse_args()
 
 	if len(args) != 1:
 		parser.error("wrong number of arguments")
 
-	# build BOM
 	file = args[0]
+
+	if kiutils_available == False and options.symbol_names == True:
+		print("including symbol names requires kiutils")
+		print("install with: pip3 install --break-system-packages kiutils")
+		exit(0)
+	elif options.symbol_names == True:
+		symbols = load_schematic_symbols(file.replace('kicad_pcb', 'kicad_sch'))
+		for sym in symbols:
+			for prop in sym.properties:
+				if prop.key == 'Reference':
+					#print('schematic_symbols[str(' + str(prop.value) + ')] = str(' + str(sym.libId) + ')')
+					schematic_symbols[str(prop.value)] = str(sym.libId)
+
+	# build BOM
 	print("Loading %s" % file)
 	pcb = pcbnew.LoadBoard(file)
 	bom_table = generate_bom(pcb, filter_layer=None)
@@ -387,7 +443,7 @@ if __name__ == "__main__":
 					csv_pnp_header(csv_file_top, os.path.splitext(file)[0] + "_top")
 
 			for i, bom_row in enumerate(bom_table_bot):
-				print("Plotting bottom page (%d/%d) %s / %s" % (i+1, len(bom_table_bot), bom_row[2], bom_row[1]))
+				print("Plotting bottom page (%d/%d) %s / %s" % (i+1, len(bom_table_bot), bom_row[3], bom_row[1]))
 				create_board_figure(pcb, bom_row, options.boards, layer=pcbnew.B_Cu)
 				if options.csv_pnp == True:
 					csv_pnp_addline(csv_file_bot, pcb, bom_row, options.boards, layer=pcbnew.B_Cu)
@@ -395,7 +451,7 @@ if __name__ == "__main__":
 				plt.close()
 
 			for i, bom_row in enumerate(bom_table_top):
-				print("Plotting top page (%d/%d) %s / %s" % (i+1, len(bom_table_top), bom_row[2], bom_row[1]))
+				print("Plotting top page (%d/%d) %s / %s" % (i+1, len(bom_table_top), bom_row[3], bom_row[1]))
 				create_board_figure(pcb, bom_row, options.boards, layer=pcbnew.F_Cu)
 				if options.csv_pnp == True:
 					csv_pnp_addline(csv_file_top, pcb, bom_row, options.boards, layer=pcbnew.F_Cu)
