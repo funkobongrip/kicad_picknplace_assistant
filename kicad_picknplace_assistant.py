@@ -138,7 +138,7 @@ def create_board_figure(pcb, bom_row, boards, layer=pcbnew.F_Cu):
 			if re.match('^[XM][0-9]', ref):
 				mvalue = mfootpr
 
-		if ref in highlight_refs and mvalue == value and mfootpr == footpr:
+		if ref in highlight_refs:
 			highlight = True
 		else:
 			highlight = False
@@ -340,7 +340,7 @@ def csv_pnp_addline(csv_file, pcb, bom_row, boards, layer=pcbnew.F_Cu):
 		except:
 			mfootpr = str(m.GetFPID().GetLibItemName())
 
-		if ref in highlight_refs and mvalue == value and footpr.endswith(mfootpr):
+		if ref in highlight_refs:
 			print("\"%s\",\"%s\",\"%s\",\"%s\",%.2f,-%.2f,0.00,%.1f" % (("TOP" if layer==pcbnew.F_Cu else "BOT"), ref, footpr, value, center[0], center[1], m.GetOrientationDegrees()), file=csv_file)
 
 def load_schematic_symbols(sch_file):
