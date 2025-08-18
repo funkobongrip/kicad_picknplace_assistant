@@ -26,7 +26,7 @@ except ImportError:
 #reload(sys)
 #sys.setdefaultencoding("utf-8")
 
-ignore_footpr = ["FIDUCIAL", "^Jumper[1-9]_Triangle"]
+ignore_footpr = ["FIDUCIAL", "^Jumper[1-9]_Triangle", "^TP-RND", "^TP$", "^TP-SQU", "^TP-THT"]
 ignore_value = ["FIDUCIAL", "DNP"]
 
 bom_table_items_per_page = 50
@@ -239,13 +239,13 @@ def generate_bom(pcb, filter_layer=None):
 		# group part refs by value and footprint
 		value = m.GetValue()
 
-		if options.short_names == True:
+		if options.long_names == True:
+			footpr = m.GetFPIDAsString()
+		else:
 			try:
 				footpr = str(m.GetFPID().GetFootprintName())
 			except:
 				footpr = str(m.GetFPID().GetLibItemName())
-		else:
-			footpr = m.GetFPIDAsString()
 		
 		partdb_id = ""
 		if m.HasFieldByName("Part-DB ID") == True:
@@ -375,8 +375,8 @@ if __name__ == "__main__":
 					  help="create csv bom file")
 	parser.add_option('-x', '--csv-pnp', action="store_true", dest="csv_pnp",
 					  help="create csv pnp file")
-	parser.add_option('-l', '--short-names', action="store_true", dest="short_names",
-					  help="create short symbol and footprint names (without library)")
+	parser.add_option('-l', '--long-names', action="store_true", dest="long_names",
+					  help="create long symbol and footprint names (with library)")
 	parser.add_option('-y', '--symbol-names', action="store_true", dest="symbol_names",
 					  help="include symbol names (requires kiutils)")
 	options, args = parser.parse_args()
