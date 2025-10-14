@@ -11,6 +11,7 @@ import numpy as np
 import os
 import re
 import csv
+from pathlib import Path
 
 try:
 	from kiutils.board import Board
@@ -26,7 +27,7 @@ except ImportError:
 #reload(sys)
 #sys.setdefaultencoding("utf-8")
 
-ignore_footpr = ["FIDUCIAL", "^Jumper[1-9]_Triangle", "^TP-RND", "^TP$", "^TP-SQU", "^TP-THT"]
+ignore_footpr = ["FIDUCIAL", "^Jumper[1-9]_Triangle"]
 ignore_value = ["FIDUCIAL", "DNP"]
 
 bom_table_items_per_page = 50
@@ -220,16 +221,11 @@ def natural_sort(l):
 								   for c in re.split('([0-9]+)', key)]
 	return sorted(l, key=alphanum_key)
 
-
-def generate_bom(pcb, filter_layer=None):
-	"""
-	Generate BOM from pcb layout.
-	:param filter_layer: include only parts for given layer
-	:return: BOM table (qty, value, footprint, refs)
-	"""
-
-	# build grouped part list
-	part_groups = {}
+def generate_part_list(pcb, filter_layer=None, old_part_groups=None, ref_prefix=None):
+	if type(old_part_groups) is dict:
+		part_groups = old_part_groups
+	else:
+		part_groups = {}
 	for m in pcb.GetFootprints():
 		smd_part = 0
 		# filter part by layer
@@ -239,13 +235,13 @@ def generate_bom(pcb, filter_layer=None):
 		# group part refs by value and footprint
 		value = m.GetValue()
 
-		if options.long_names == True:
-			footpr = m.GetFPIDAsString()
-		else:
+		if options.short_names == True:
 			try:
 				footpr = str(m.GetFPID().GetFootprintName())
 			except:
 				footpr = str(m.GetFPID().GetLibItemName())
+		else:
+			footpr = m.GetFPIDAsString()
 		
 		partdb_id = ""
 		if m.HasFieldByName("Part-DB ID") == True:
@@ -267,8 +263,14 @@ def generate_bom(pcb, filter_layer=None):
 
 		group_key = (value, footpr, m.IsDNP(), m.IsExcludedFromBOM(), partdb_id, smd_part, symbol_lib_name)
 		refs = part_groups.setdefault(group_key, [])
-		refs.append(reference)
+		if type(ref_prefix) is str:
+			reference = str(ref_prefix) + ":" + reference
+			refs.append(reference)
+		else:
+			refs.append(reference)
+	return part_groups
 
+def generate_bom_table(part_groups):
 	# build bom table, sort refs
 	bom_table_smd = []
 	bom_table_thd = []
@@ -299,15 +301,39 @@ def generate_bom(pcb, filter_layer=None):
 
 	# sort table by reference prefix and quantity
 	def sort_func(row):
-		qty, _, _, _, _, _, rf = row
-		ref_ord = {"R": 3, "C": 3, "L": 1, "D": 1,
-				   "J": -1, "P": -1}.get(rf[0][0], 0)
+		qty, _, _, footpr, _, _, rf = row
+		ref_ord = 0
+		if ":" in footpr:
+			_, footpr = footpr.split(":")
+		if re.match("^[C][0-9]{4}", footpr):
+			ref_ord = 4
+		if re.match("^[R][0-9]{4}", footpr):
+			ref_ord = 3
+		elif re.match("^[L][0-9]{4}", footpr):
+			ref_ord = 1
+		elif re.match("^D_", footpr):
+			ref_ord = 1
 		return -ref_ord, -qty
 
 	bom_table_smd = sorted(bom_table_smd, key=sort_func)
 	bom_table_thd = sorted(bom_table_thd, key=sort_func)
 
 	bom_table = bom_table_smd + bom_table_thd
+
+	return [bom_table, bom_table_smd, bom_table_thd]
+
+def generate_bom(pcb, filter_layer=None):
+	"""
+	Generate BOM from pcb layout.
+	:param filter_layer: include only parts for given layer
+	:return: BOM table (qty, value, footprint, refs)
+	"""
+
+	# build grouped part list
+	part_groups = generate_part_list(pcb, filter_layer)
+
+	# build bom table, sort refs
+	(bom_table, bom_table_smd, bom_table_thd) = generate_bom_table(part_groups)
 
 	return bom_table
 
@@ -375,16 +401,13 @@ if __name__ == "__main__":
 					  help="create csv bom file")
 	parser.add_option('-x', '--csv-pnp', action="store_true", dest="csv_pnp",
 					  help="create csv pnp file")
-	parser.add_option('-l', '--long-names', action="store_true", dest="long_names",
-					  help="create long symbol and footprint names (with library)")
+	parser.add_option('-l', '--short-names', action="store_true", dest="short_names",
+					  help="create short symbol and footprint names (without library)")
 	parser.add_option('-y', '--symbol-names', action="store_true", dest="symbol_names",
 					  help="include symbol names (requires kiutils)")
+	parser.add_option('-a', '--multi-board-bom', action="store_true", dest="multi_board_bom",
+					  help="generate bom for multiple boards, supply boards with x.kicad_pcb:num")
 	options, args = parser.parse_args()
-
-	if len(args) != 1:
-		parser.error("wrong number of arguments")
-
-	file = args[0]
 
 	if kiutils_available == False and options.symbol_names == True:
 		print("including symbol names requires kiutils")
@@ -398,108 +421,159 @@ if __name__ == "__main__":
 					#print('schematic_symbols[str(' + str(prop.value) + ')] = str(' + str(sym.libId) + ')')
 					schematic_symbols[str(prop.value)] = str(sym.libId)
 
-	# build BOM
-	print("Loading %s" % file)
-	pcb = pcbnew.LoadBoard(file)
-	bom_table = generate_bom(pcb, filter_layer=None)
-	bom_table_bot = generate_bom(pcb, filter_layer=pcbnew.B_Cu)
-	bom_table_top = generate_bom(pcb, filter_layer=pcbnew.F_Cu)
+	if options.multi_board_bom == True:
+		part_groups = {}
+		boards_qty = dict()
 
-	# for each part group, print page to PDF
-	if options.split != True:
-		fname_out = os.path.splitext(file)[0] + "_picknplace.pdf"
-		with PdfPages(fname_out) as pdf:
-			bom_table_items = len(bom_table)
-			if bom_table_items <= bom_table_items_per_page:
-				bom_table_pages = 1
+		for b in args:
+			(board_file, board_num) = b.split(":")
+			board_name_from_file = Path(board_file).stem
+			boards_qty[board_name_from_file] = board_num
+			pcb = pcbnew.LoadBoard(board_file)
+			# build grouped part list
+			part_groups = generate_part_list(pcb, old_part_groups=part_groups, ref_prefix=board_name_from_file)
+			del pcb
+
+		# build bom table, sort refs
+		(bom_table, bom_table_smd, bom_table_thd) = generate_bom_table(part_groups)
+		bom_csv_open = open("bom.csv", 'w')
+		bom_csv_writer = csv.writer(bom_csv_open)
+		if options.symbol_names == True:
+			bom_csv_writer.writerow(['qty', 'footprint', 'symname', 'value', 'partdb_id', 'refs'])
+		else:
+			bom_csv_writer.writerow(['qty', 'footprint', 'value', 'partdb_id', 'refs'])
+
+		for i, bom_row in enumerate(bom_table):
+			qty, value, partdb_id, footpr, symname, smt, highlight_refs = bom_row
+
+			refboard = ""
+			refstr = ""
+			qty = 0
+			for r in highlight_refs:
+				(brd, ref) = r.split(":")
+				if refboard == "":
+					refstr = brd + ":(" + ref
+				elif refboard != brd:
+					refstr += ") " + brd + ":(" + ref
+				else:
+					refstr += ", " + ref
+				refboard = brd
+				qty += int(boards_qty[brd])
+			refstr += ")"
+
+			if options.symbol_names == True:
+				bom_csv_writer.writerow([str(qty), footpr, symname, value, partdb_id, refstr])
 			else:
-				bom_table_pages = int(math.ceil(bom_table_items / bom_table_items_per_page))
-				bom_table_items_per_page = int(math.ceil(bom_table_items / bom_table_pages))
+				bom_csv_writer.writerow([str(qty), footpr, value, partdb_id, refstr])
+		exit(0)
+	else:
+		if len(args) != 1:
+			parser.error("wrong number of arguments")
+
+		file = args[0]
+
+		# build BOM
+		print("Loading %s" % file)
+		pcb = pcbnew.LoadBoard(file)
+		bom_table = generate_bom(pcb, filter_layer=None)
+		bom_table_bot = generate_bom(pcb, filter_layer=pcbnew.B_Cu)
+		bom_table_top = generate_bom(pcb, filter_layer=pcbnew.F_Cu)
+
+		# for each part group, print page to PDF
+		if options.split != True:
+			fname_out = os.path.splitext(file)[0] + "_picknplace.pdf"
+			with PdfPages(fname_out) as pdf:
+				bom_table_items = len(bom_table)
+				if bom_table_items <= bom_table_items_per_page:
+					bom_table_pages = 1
+				else:
+					bom_table_pages = int(math.ceil(bom_table_items / bom_table_items_per_page))
+					bom_table_items_per_page = int(math.ceil(bom_table_items / bom_table_pages))
+					
+				for st in range(0, bom_table_pages):
+					create_board_bom(pcb, options.boards, bom_table, st * bom_table_items_per_page, (st+1) * bom_table_items_per_page)
+					pdf.savefig()
+					plt.close()
+
+				if options.bom_only:
+					exit(0)
+
+				csv_file_bot_name = os.path.splitext(file)[0] + "_picknplace_bot.csv"
+				csv_file_top_name = os.path.splitext(file)[0] + "_picknplace_top.csv"
 				
-			for st in range(0, bom_table_pages):
-				create_board_bom(pcb, options.boards, bom_table, st * bom_table_items_per_page, (st+1) * bom_table_items_per_page)
-				pdf.savefig()
-				plt.close()
+				if len(bom_table_bot) > 0 and options.csv_pnp == True:
+					try:
+						csv_file_bot = open(csv_file_bot_name, 'w')
+					except:
+						print("Error opening file" + csv_file_bot_name)
+					if options.csv_pnp == True:
+						csv_pnp_header(csv_file_bot, os.path.splitext(file)[0] + "_bot")
 
-			if options.bom_only:
-				exit(0)
+				if len(bom_table_top) > 0 and options.csv_pnp == True:
+					try:
+						csv_file_top = open(csv_file_top_name, 'w')
+					except:
+						print("Error opening file" + csv_file_top_name)
+					if options.csv_pnp == True:
+						csv_pnp_header(csv_file_top, os.path.splitext(file)[0] + "_top")
 
-			csv_file_bot_name = os.path.splitext(file)[0] + "_picknplace_bot.csv"
-			csv_file_top_name = os.path.splitext(file)[0] + "_picknplace_top.csv"
-			
-			if len(bom_table_bot) > 0 and options.csv_pnp == True:
-				try:
-					csv_file_bot = open(csv_file_bot_name, 'w')
-				except:
-					print("Error opening file" + csv_file_bot_name)
-				if options.csv_pnp == True:
-					csv_pnp_header(csv_file_bot, os.path.splitext(file)[0] + "_bot")
+				for i, bom_row in enumerate(bom_table_bot):
+					print("Plotting bottom page (%d/%d) %s / %s" % (i+1, len(bom_table_bot), bom_row[3], bom_row[1]))
+					create_board_figure(pcb, bom_row, options.boards, layer=pcbnew.B_Cu)
+					if options.csv_pnp == True:
+						csv_pnp_addline(csv_file_bot, pcb, bom_row, options.boards, layer=pcbnew.B_Cu)
+					pdf.savefig()
+					plt.close()
 
-			if len(bom_table_top) > 0 and options.csv_pnp == True:
-				try:
-					csv_file_top = open(csv_file_top_name, 'w')
-				except:
-					print("Error opening file" + csv_file_top_name)
-				if options.csv_pnp == True:
-					csv_pnp_header(csv_file_top, os.path.splitext(file)[0] + "_top")
+				for i, bom_row in enumerate(bom_table_top):
+					print("Plotting top page (%d/%d) %s / %s" % (i+1, len(bom_table_top), bom_row[3], bom_row[1]))
+					create_board_figure(pcb, bom_row, options.boards, layer=pcbnew.F_Cu)
+					if options.csv_pnp == True:
+						csv_pnp_addline(csv_file_top, pcb, bom_row, options.boards, layer=pcbnew.F_Cu)
+					pdf.savefig()
+					plt.close()
 
-			for i, bom_row in enumerate(bom_table_bot):
-				print("Plotting bottom page (%d/%d) %s / %s" % (i+1, len(bom_table_bot), bom_row[3], bom_row[1]))
-				create_board_figure(pcb, bom_row, options.boards, layer=pcbnew.B_Cu)
-				if options.csv_pnp == True:
-					csv_pnp_addline(csv_file_bot, pcb, bom_row, options.boards, layer=pcbnew.B_Cu)
-				pdf.savefig()
-				plt.close()
+				print("Output written to %s" % fname_out)
+
+				if len(bom_table_bot) > 0 and options.csv_pnp == True:
+					csv_file_bot.close()
+					if options.csv_pnp == True:
+						print("Output written to %s" % csv_file_bot_name)
+
+				if len(bom_table_top) > 0 and options.csv_pnp == True:
+					csv_file_top.close()
+					if options.csv_pnp == True:
+						print("Output written to %s" % csv_file_top_name)
+		else:
+			if options.fsort:
+				shutil.rmtree('smt', ignore_errors=True)
+				shutil.rmtree('tht', ignore_errors=True)
+				os.makedirs('smt/small')
+				os.makedirs('tht/connectors')
 
 			for i, bom_row in enumerate(bom_table_top):
-				print("Plotting top page (%d/%d) %s / %s" % (i+1, len(bom_table_top), bom_row[3], bom_row[1]))
-				create_board_figure(pcb, bom_row, options.boards, layer=pcbnew.F_Cu)
-				if options.csv_pnp == True:
-					csv_pnp_addline(csv_file_top, pcb, bom_row, options.boards, layer=pcbnew.F_Cu)
-				pdf.savefig()
-				plt.close()
+				if bom_row[3] == 1:
+					mtype = 'smt'
+				else:
+					mtype = 'tht'
 
-			print("Output written to %s" % fname_out)
+				msubtype = ''
+				for r in bom_row[4]:
+					if re.match('^[X][0-9]', r) and mtype == 'tht':
+						msubtype = 'connectors/'
+				if re.match('^[RCD][0-9]{4}$', bom_row[2]) or re.match('^D_SOD[0-9]', bom_row[2]) or re.match('^[RC]NET', bom_row[2]):
+					msubtype = 'small/'
 
-			if len(bom_table_bot) > 0 and options.csv_pnp == True:
-				csv_file_bot.close()
-				if options.csv_pnp == True:
-					print("Output written to %s" % csv_file_bot_name)
+				if options.fsort:
+					fname_out = mtype + "/" + msubtype + bom_row[2].replace('/', '_') + '_' + bom_row[1].replace(
+						'/', '_') + "_" + os.path.splitext(file)[0] + "_picknplace.pdf"
+				else:
+					fname_out = bom_row[2].replace('/', '_') + '_' + bom_row[1].replace(
+						'/', '_') + "_" + mtype + "_" + os.path.splitext(file)[0] + "_picknplace.pdf"
 
-			if len(bom_table_top) > 0 and options.csv_pnp == True:
-				csv_file_top.close()
-				if options.csv_pnp == True:
-					print("Output written to %s" % csv_file_top_name)
-	else:
-		if options.fsort:
-			shutil.rmtree('smt', ignore_errors=True)
-			shutil.rmtree('tht', ignore_errors=True)
-			os.makedirs('smt/small')
-			os.makedirs('tht/connectors')
-
-		for i, bom_row in enumerate(bom_table_top):
-			if bom_row[3] == 1:
-				mtype = 'smt'
-			else:
-				mtype = 'tht'
-
-			msubtype = ''
-			for r in bom_row[4]:
-				if re.match('^[X][0-9]', r) and mtype == 'tht':
-					msubtype = 'connectors/'
-			if re.match('^[RCD][0-9]{4}$', bom_row[2]) or re.match('^D_SOD[0-9]', bom_row[2]) or re.match('^[RC]NET', bom_row[2]):
-				msubtype = 'small/'
-
-			if options.fsort:
-				fname_out = mtype + "/" + msubtype + bom_row[2].replace('/', '_') + '_' + bom_row[1].replace(
-					'/', '_') + "_" + os.path.splitext(file)[0] + "_picknplace.pdf"
-			else:
-				fname_out = bom_row[2].replace('/', '_') + '_' + bom_row[1].replace(
-					'/', '_') + "_" + mtype + "_" + os.path.splitext(file)[0] + "_picknplace.pdf"
-
-			print("Plotting (%d/%d) %s / %s to %s" %
-				  (i+1, len(bom_table_top), bom_row[2], bom_row[1], fname_out))
-			with PdfPages(fname_out) as pdf:
-				create_board_figure(pcb, bom_row, layer=pcbnew.F_Cu)
-				pdf.savefig()
-				plt.close()
+				print("Plotting (%d/%d) %s / %s to %s" %
+					  (i+1, len(bom_table_top), bom_row[2], bom_row[1], fname_out))
+				with PdfPages(fname_out) as pdf:
+					create_board_figure(pcb, bom_row, layer=pcbnew.F_Cu)
+					pdf.savefig()
+					plt.close()
