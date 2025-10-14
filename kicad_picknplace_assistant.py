@@ -29,6 +29,7 @@ except ImportError:
 
 ignore_footpr = ["FIDUCIAL", "^Jumper[1-9]_Triangle"]
 ignore_value = ["FIDUCIAL", "DNP"]
+force_values = [[".*TP-5021$", "5021"], [".*TP-5023$", "5023"], [".*TP-5001$", "5001"]]
 
 bom_table_items_per_page = 50
 
@@ -226,6 +227,7 @@ def generate_part_list(pcb, filter_layer=None, old_part_groups=None, ref_prefix=
 		part_groups = old_part_groups
 	else:
 		part_groups = {}
+
 	for m in pcb.GetFootprints():
 		smd_part = 0
 		# filter part by layer
@@ -243,6 +245,11 @@ def generate_part_list(pcb, filter_layer=None, old_part_groups=None, ref_prefix=
 		else:
 			footpr = m.GetFPIDAsString()
 		
+		for (regex, fvalue) in force_values:
+			ma = re.match(regex, footpr)
+			if ma:
+				value = fvalue
+
 		partdb_id = ""
 		if m.HasFieldByName("Part-DB ID") == True:
 			partdb_id = m.GetFieldText("Part-DB ID")
@@ -427,12 +434,12 @@ if __name__ == "__main__":
 
 		for b in args:
 			(board_file, board_num) = b.split(":")
+			print("Loading %s" % board_file)
 			board_name_from_file = Path(board_file).stem
 			boards_qty[board_name_from_file] = board_num
 			pcb = pcbnew.LoadBoard(board_file)
 			# build grouped part list
 			part_groups = generate_part_list(pcb, old_part_groups=part_groups, ref_prefix=board_name_from_file)
-			del pcb
 
 		# build bom table, sort refs
 		(bom_table, bom_table_smd, bom_table_thd) = generate_bom_table(part_groups)
