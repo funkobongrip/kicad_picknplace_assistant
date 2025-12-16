@@ -374,7 +374,7 @@ def csv_pnp_addline(csv_file, pcb, bom_row, boards, layer=pcbnew.F_Cu):
 			mfootpr = str(m.GetFPID().GetLibItemName())
 
 		if ref in highlight_refs:
-			print("\"%s\",\"%s\",\"%s\",\"%s\",%.2f,-%.2f,0.00,%.1f" % (("TOP" if layer==pcbnew.F_Cu else "BOT"), ref, footpr, value, center[0], center[1], m.GetOrientationDegrees()), file=csv_file)
+			print("\"%s\",\"%s\",\"%s\",\"%s\",%.2f,%.2f,0.00,%.1f" % (("TOP" if layer==pcbnew.F_Cu else "BOT"), ref, footpr, value, center[0], (float(center[1]) * -1.0), m.GetOrientationDegrees()), file=csv_file)
 
 def load_schematic_symbols(sch_file):
 	symbols = []
